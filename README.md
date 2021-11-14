@@ -1,4 +1,4 @@
-# Challenge
+# Prognostics & Health Management Society 2021 Challenge
 
 For the [PHM challenge of 2021](https://phm-europe.org/data-challenge) we need to classify healthy and faulty (5 faults in total) behavior of a test-bed, utilising sensor data from a set of 70 experiments, each having a duration between 1 to 3 hours.
 Following is a description of the testbed and the dataset:
@@ -8,7 +8,7 @@ The testbed under consideration represents a typical component of a large-scale 
 
 More specifically, the machine consists of a 4-axis SCARA-robot picking up electrical fuses with a vacuum gripper, from a feeder to a fuse-test-bench. On this fuse-test-bench, first it assesses whether the fuse is conducting electricity. If the first test was successful, the fuse gets heated up by applying a current of 200mA for a time interval of 1.5s. The heating up is measured by a thermal camera. After the tests, the fuse is moved back into the feeder with two conveyor belts. A picture of the machine and an illustration of the main steps involved in the quality-control process are shown below:
 
-![caption](./Systeme-description-768x611.png)
+![caption](./imm/Systeme-description-768x611.png)
 
 
 1. The fuses are first picked up by a robotic arm.
