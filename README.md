@@ -171,7 +171,7 @@ msno.matrix(df);
 
 
     
-![png](output_10_0.png)
+![png](./imm/output_10_0.png)
     
 
 
@@ -193,7 +193,7 @@ plt.legend(['10% limit']);
 
 
     
-![png](output_12_0.png)
+![png](./imm/output_12_0.png)
     
 
 
@@ -219,7 +219,7 @@ df.nunique().sort_values().plot.bar(figsize = (15, 4), ylabel = '# Unique values
 
 
     
-![png](output_16_0.png)
+![png](./imm/output_16_0.png)
     
 
 
@@ -293,7 +293,7 @@ plt.title('Pearson corr. coeff. between vFreq and vCnt fields');
 
 
     
-![png](output_22_0.png)
+![png](./imm/output_22_0.png)
     
 
 
@@ -354,7 +354,7 @@ plt.ylabel('Pearson Correlation');
 
 
     
-![png](output_27_0.png)
+![png](./imm/output_27_0.png)
     
 
 
