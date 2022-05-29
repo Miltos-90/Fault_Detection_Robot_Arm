@@ -1,4 +1,4 @@
-# Prognostics & Health Management Society 2021 Challenge
+# Fault detection and classification of a robot arm test-bed
 
 For the [PHM challenge of 2021](https://phm-europe.org/data-challenge) we need to classify healthy and faulty (5 faults in total) behavior of a test-bed, utilising sensor data from a set of 70 experiments, each having a duration between 1 to 3 hours.
 Following is a description of the testbed and the dataset:
@@ -70,54 +70,15 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import missingno as msno
-from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import OneHotEncoder, MinMaxScaler
-from sklearn.metrics import roc_auc_score
-from sklearn.utils.class_weight import compute_class_weight
+from sklearn.model_selection import StratifiedKFold
+
+import utils
+from ExtremeLearningMachine import ELM
+
 ```
 
-Let's write a parser for the files:
-
-
-```python
-# Parser for one file
-def parse_file(file_data):
-    
-    line_dfs = []
-    no_lines = len(file_data)
-
-    for idx in np.arange(no_lines):
-
-        # Read line
-        line        = file_data.iloc[idx]
-
-        # Get feature name
-        feature     = line.iloc[0]
-
-        # Get feature's names of the data recorded
-        feat_fields = fields.loc[feature]
-
-        # Parse data line
-        data        = line.iloc[1].replace('[','').split('],')
-        data        = [tuple(map(float, s.replace(']','').split(','))) for s in data]
-
-        # Make dataframe column names
-        colnames = [feature + '_' + elem for elem in feat_fields if isinstance(elem, str)]
-        colnames = colnames[0:len(data[0])]
-
-        # Make dataframe out of this line
-        line = pd.DataFrame(data, columns = colnames)
-
-        # Append to list
-        line_dfs.append(line)
-
-    # concatenate list of dfs
-    line_dfs = pd.concat(line_dfs, axis = 1)
-    
-    return line_dfs
-```
-
-And now we can read the data:
+Read data
 
 
 ```python
@@ -327,23 +288,7 @@ We need to check for both
 
 
 ```python
-def get_redundant_pairs(df):
-    '''Get diagonal and lower triangular pairs of correlation matrix'''
-    pairs_to_drop = set()
-    cols          = df.columns
-    
-    for i in range(0, df.shape[1]):
-        for j in range(0, i + 1):
-            
-            pairs_to_drop.add((cols[i], cols[j]))
-            
-    return pairs_to_drop
-
-```
-
-
-```python
-lbls_drop = get_redundant_pairs(df)
+lbls_drop = utils.get_redundant_pairs(df)
 c         = df.corr().abs().unstack().drop(labels=lbls_drop).sort_values(ascending = False)
 plt.figure(figsize = (10, 4))
 plt.plot(range(len(c)), c)
@@ -388,143 +333,11 @@ We removed approximately 40% of the features.
 
 # Modelling
 
-## Helper functions 
+We will follow 'sliding window' approach, to provide some context of the time-series for the learning algorithm, and the usual preprocessing required for the ELM.
 
-We need a few functions:
-* Function to generate a 'sliding window' dataset to provide some context of the time-series for the learning algorithm, 
-* the preprocessing pipeline, 
-* and a train / validation wrapper
+We'll perform nested CV for the full model selection and error estimation process, and we'll monitor the Area Under the Receiver Operating Characteristic (AUROC), weighted by support for class imbalance.
 
-
-```python
-def make_sliding_window(X, group_var, window):
-    ''' Function to include lags of the predictors as additional predictors for each experiment'''
-    
-    if window > 0:
-        
-        # Make dataframe from numpy array
-        X_df = pd.DataFrame(X)
-        X_df['group'] = group_var
-
-        # List to hold shifted dataframes (one per experiment)
-        shifted_data = []
-
-        # Groupby experiment
-        for group, data in X_df.groupby('group'):
-
-            # Shift experiment dataframe
-            new_df = pd.concat([data.shift(i) for i in range(window)], axis = 1)
-
-            # Drop group column
-            new_df.drop('group', axis = 1, inplace = True)
-
-            # Append to list
-            shifted_data.append(new_df) 
-
-        # List of experiments to new dataframe
-        new_X = pd.concat(shifted_data, axis = 0)
-
-        # Convert NaNs on the first rows to zeroes
-        new_X.fillna(value = 0, inplace = True)
-        
-    else:
-        
-        # Do not perform sliding window
-        new_X = pd.DataFrame(X)
-    
-    return new_X.values
-
-def preprocess(X_t, X_v, y_t, y_v):
-    ''' Apply preprocessing pipeline '''
-    
-    # Scale
-    scaler = MinMaxScaler(feature_range = (-1, 1))
-    X_tn   = scaler.fit_transform(X_t)
-    X_vn   = scaler.transform(X_v)
-
-    # One-hot encode targets
-    enc = OneHotEncoder(handle_unknown='ignore')
-    enc.fit(y_t.reshape(-1, 1))
-    
-    y_t_oh = enc.transform(y_t.reshape(-1, 1)).toarray()
-    y_v_oh = enc.transform(y_v.reshape(-1, 1)).toarray()
-    
-    return X_tn, X_vn, y_t_oh, y_v_oh
-
-
-def train_predict(X, y, elm_hidden, t_idx, v_idx):
-    '''' Train on the test and compute score on a validation set '''
-    
-    # Make training / validation sets for this fold
-    X_t, y_t = X[t_idx, :], y[t_idx]
-    X_v, y_v = X[v_idx, :], y[v_idx]
-
-    # Apply preprocessing
-    X_tn, X_vn, y_toh, y_voh = preprocess(X_t, X_v, y_t, y_v)
-
-    # Train ELM
-    elm = ELM(input_size = X_tn.shape[1], hidden_size = elm_hidden)
-    elm.fit(X_tn, y_toh)
-
-    # Predict
-    y_hat = elm.predict(X_vn)
-
-    # Grab AUC-ROC
-    score = roc_auc_score(y_voh, y_hat, average = 'weighted', multi_class = 'ovr')
-                
-    return score
-```
-
-## Extreme Learning Machine
-
-Let's write a short class for the ELM:
-
-
-```python
-class ELM(object):
-    
-    def __init__(self, input_size, hidden_size):
-        
-        # Initialise weights and biases for the hidden layer
-        self.W = np.random.uniform(low = -0.5, high = 0.5, size = (input_size, hidden_size))
-        self.b = np.random.uniform(low = -0.5, high = 0.5, size = [hidden_size])
-
-    def fit(self, X, y):
-        
-        # Hidden layer nodes
-        H = ELM.sigmoid(np.dot(X, self.W) + self.b)
-        
-        # Moore-penrose pseudoinverse
-        H = np.linalg.pinv(H) # Moore-penrose pseudoinverse
-        
-        # Output weights
-        self.betas = np.dot(H, y)
-        
-        return
-        
-    def predict(self, X):
-        
-        # Hidden layer nodes
-        H = ELM.sigmoid(np.dot(X, self.W) + self.b)
-        
-        return np.dot(H, self.betas)
-    
-    @staticmethod
-    def sigmoid(x):
-        
-        # Prevent overflow.
-        x = np.clip(x, -500, 500)
-        
-        # Compute activation
-        return 1 / ( 1 + np.exp(-x) )
-
-
-```
-
-Now we can test our pipeline. We'll perform nested CV for the full model selection and error estimation process. 
-As seen in the train_predict() function, we'll be monitoring the Area Under the Receiver Operating Characteristic (AUROC), weighted by support for class imbalance.
-
-We'll also stratify on the 'experiment level'. meaning that we'll separate entire experiments for the train/val/test splits.
+We'll also stratify on the 'experiment level', meaning that we'll separate entire experiments for the train/val/test splits.
 
 
 ```python
@@ -557,13 +370,14 @@ for outer_fold, (t_idx, v_idx) in enumerate(skf_outer.split(X, skf_groups)):
     for window in hyperparams["windows"]:
         
         # Apply sliding window on a new hyperparameter set only
-        X_t_sw = make_sliding_window(X[t_idx, :], skf_groups[t_idx], window)
+        X_t_sw = utils.make_sliding_window(X[t_idx, :], skf_groups[t_idx], window)
         
         # Loop over hidden sizes
         for elm_hidden in hyperparams["elm_hidden"]:
 
             # Run inner k-fold
-            scores = [train_predict(X_t_sw, y[t_idx], elm_hidden, train_idx, val_idx) for train_idx, val_idx in skf_inner.split(X_t_sw, skf_groups[t_idx])]            
+            scores = [utils.train_predict(X_t_sw, y[t_idx], elm_hidden, train_idx, val_idx) \
+                        for train_idx, val_idx in skf_inner.split(X_t_sw, skf_groups[t_idx])]            
             mean_score, std_score = np.mean(scores), np.std(scores)
             
             # Check if this configuration is better than the previous
@@ -572,8 +386,8 @@ for outer_fold, (t_idx, v_idx) in enumerate(skf_outer.split(X, skf_groups)):
                 best_score, best_std       = mean_score, std_score
     
     # Re-train w/ the best hyperparams and predict on the test set
-    X_sw    = make_sliding_window(X, skf_groups, best_window)
-    t_score = train_predict(X_sw, y, best_elm_size, t_idx, v_idx)
+    X_sw    = utils.make_sliding_window(X, skf_groups, best_window)
+    t_score = utils.train_predict(X_sw, y, best_elm_size, t_idx, v_idx)
     test_scores.append(t_score)
     
     # Print results
@@ -597,10 +411,10 @@ final_window   = 1
 final_layer_sz = 5000
 
 # Apply sliding window
-X_sw = make_sliding_window(X, skf_groups, final_window)
+X_sw = utils.make_sliding_window(X, skf_groups, final_window)
 
 # Scale
-scaler = MinMaxScaler(feature_range = (-1, 1))
+scaler = utils.MinMaxScaler(feature_range = (-1, 1))
 X_sw   = scaler.fit_transform(X_sw)
 
 # One hot encode the targets
