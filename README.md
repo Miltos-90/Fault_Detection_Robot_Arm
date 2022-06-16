@@ -401,28 +401,4 @@ for outer_fold, (t_idx, v_idx) in enumerate(skf_outer.split(X, skf_groups)):
     Outer fold  5 | Best Window  1, Best Hidden Layer No.  4999 | CV Score: 0.977 +- 0.002, Test set Score: 0.982
     
 
-The results are very consistent. We can use 4999 (5000) neurons for the hidden layer of the ELM with a window of 1. 5000 is the upper limit of neurons, meaning that if we allow higher values the score might improve even more, but this is definitely satisfactory.
-
-Now we can train on the entire dataset and save the model:
-
-
-```python
-final_window   = 1
-final_layer_sz = 5000
-
-# Apply sliding window
-X_sw = utils.make_sliding_window(X, skf_groups, final_window)
-
-# Scale
-scaler = utils.MinMaxScaler(feature_range = (-1, 1))
-X_sw   = scaler.fit_transform(X_sw)
-
-# One hot encode the targets
-enc = OneHotEncoder(handle_unknown = 'ignore')
-enc.fit(y.reshape(-1, 1))
-y_oh = enc.transform(y.reshape(-1, 1)).toarray()
-
-# Train ELM
-elm = ELM(input_size = X.shape[1], hidden_size = elm_hidden)
-elm.fit(X, y_oh)
-```
+The results are consistent. 5000 neurons is the upper limit in the grid search, meaning that if higher values are used the score might improve even more, but this is a good score.
